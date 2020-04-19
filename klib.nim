@@ -148,24 +148,68 @@ proc xopen*[T](fn: string, mode: FileMode = fmRead,
 proc close*[T](f: var Bufio[T]): int {.discardable.} =
   return f.fp.close()
 
+proc eof*[T](f: Bufio[T]): bool =
+  result = (f.EOF and f.st >= f.en)
+
 proc read*[T](f: var Bufio[T], buf: var string, sz: int,
     offset: int = 0): int {.discardable.} =
-  if f.EOF and f.st > f.sz:
-    return 0
-  if buf.len < offset + sz: buf.setLen(offset + sz)
+  if f.EOF and f.st >= f.en: return 0
+  buf.setLen(offset)
   var off = offset
   var rest = sz
   while rest > f.en - f.st:
-    var l = f.en - f.st
-    copyMem(buf[off].addr, f.buf[f.st].addr, l)
-    rest -= l
-    off += l
+    if f.en > f.st:
+      var l = f.en - f.st
+      if buf.len < off + l: buf.setLen(off + l)
+      copyMem(buf[off].addr, f.buf[f.st].addr, l)
+      rest -= l
+      off += l
     (f.st, f.en) = (0, f.fp.read(f.buf, f.sz))
     if f.en < f.sz: f.EOF = true
     if f.en == 0: return off - offset
+  if buf.len < off + rest: buf.setLen(off + rest)
   copyMem(buf[off].addr, f.buf[f.st].addr, rest)
   f.st += rest
   return off + rest - offset
 
-proc readUntil*[T](f: var Bufio[T], buf: var string, delim: int = -1, keep: bool = false): int =
-  result = -1
+proc readUntil*[T](f: var Bufio[T], buf: var string, delim: int = -1,
+    offset: int = 0, keep: bool = false): int {.discardable.} =
+  if f.EOF and f.st >= f.en: return -1
+  buf.setLen(offset)
+  var off = offset
+  var gotany = false
+  while true:
+    if f.st >= f.en:
+      if not f.EOF:
+        (f.st, f.en) = (0, f.fp.read(f.buf, f.sz))
+        if f.en < f.sz: f.EOF = true
+        if f.en == 0: break
+        if f.en < 0:
+          f.EOF = true
+          return -2
+      else: break
+    var x: int = f.en
+    if delim == -1:
+      for i in f.st..<f.en:
+        if f.buf[i] == '\n': x = i; break
+    elif delim == -2:
+      for i in f.st..<f.en:
+        if f.buf[i] == '\t' or f.buf[i] == ' ' or f.buf[i] == '\n':
+          x = i; break
+    else:
+      for i in f.st..<f.en:
+        if f.buf[i] == char(delim): x = i; break
+    gotany = true
+    var l = x - f.st
+    if keep and x < f.en: l += 1
+    if l > 0:
+      if buf.len < off + l: buf.setLen(off + l)
+      copyMem(buf[off].addr, f.buf[f.st].addr, l)
+      off += l
+    f.st = x + 1
+    if x < f.en: break
+  if not gotany and f.eof(): return -1
+  if delim == -1 and off > 0 and buf[off - 1] == '\r':
+    off -= 1
+    buf.setLen(off)
+  return off - offset
