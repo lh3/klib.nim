@@ -321,17 +321,13 @@ proc index*[T](a: var seq[Interval[T]]): int {.discardable.} =
     k += 1
   return k - 1
 
-type
-  IntvStack = ref object
-    k, x, w: int
-
 iterator overlap*[T](a: seq[Interval[T]], st: int, en: int): int =
   var h: int = 0
   while 1 shl h <= a.len: h += 1
   h -= 1 # h is the height of the tree
-  var stack: array[64, IntvStack] # 64 is the max possible tree height
+  var stack: array[64, tuple[k, x, w:int]] # 64 is the max possible tree height
   var t: int = 0
-  stack[t] = IntvStack(k:h, x:(1 shl h) - 1, w:0); t += 1 # push the root
+  stack[t] = (h, (1 shl h) - 1, 0); t += 1 # push the root
   while t > 0: # the following guarantees sorted "yield"
     t -= 1
     let z = stack[t] # pop from the stack
@@ -344,9 +340,9 @@ iterator overlap*[T](a: seq[Interval[T]], st: int, en: int): int =
         if st < a[i].en: yield i # overlap! yield
     elif z.w == 0: # the left child not processed
       let y = z.x - (1 shl (z.k - 1)) # the left child of z.x; y may >=a.len
-      stack[t] = IntvStack(k:z.k, x:z.x, w:1); t += 1
+      stack[t] = (z.k, z.x, 1); t += 1
       if y >= a.len or a[y].max > st:
-        stack[t] = IntvStack(k:z.k-1, x:y, w:0); t += 1 # add left child
+        stack[t] = (z.k-1, y, 0); t += 1 # add left child
     elif z.x < a.len and a[z.x].st < en: # need to push the right child
       if st < a[z.x].en: yield z.x # test if z.x overlaps the query
-      stack[t] = IntvStack(k:z.k - 1, x:z.x + (1 shl (z.k - 1)), w:0); t += 1
+      stack[t] = (z.k - 1, z.x + (1 shl (z.k - 1)), 0); t += 1
