@@ -151,6 +151,15 @@ proc close*[T](f: var Bufio[T]): int {.discardable.} =
 proc eof*[T](f: Bufio[T]): bool =
   result = (f.EOF and f.st >= f.en)
 
+proc read*[T](f: var Bufio[T]): int =
+  if f.EOF and f.st >= f.en: return -1
+  if f.st >= f.en:
+    (f.st, f.en) = (0, f.fp.read(f.buf, f.sz))
+    if f.en == 0: f.EOF = true; return -1
+    if f.en < 0: f.EOF = true; return -2
+  result = int(f.buf[f.st])
+  f.st += 1
+
 proc read*[T](f: var Bufio[T], buf: var string, sz: int,
     offset: int = 0): int {.discardable.} =
   if f.EOF and f.st >= f.en: return 0
@@ -159,7 +168,7 @@ proc read*[T](f: var Bufio[T], buf: var string, sz: int,
   var rest = sz
   while rest > f.en - f.st:
     if f.en > f.st:
-      var l = f.en - f.st
+      let l = f.en - f.st
       if buf.len < off + l: buf.setLen(off + l)
       copyMem(buf[off].addr, f.buf[f.st].addr, l)
       rest -= l
@@ -172,13 +181,14 @@ proc read*[T](f: var Bufio[T], buf: var string, sz: int,
   f.st += rest
   return off + rest - offset
 
-proc readUntil*[T](f: var Bufio[T], buf: var string, delim: int = -1,
-    offset: int = 0, keep: bool = false): int {.discardable.} =
+proc readUntil*[T](f: var Bufio[T], buf: var string, dret: var char,
+    delim: int = -1, offset: int = 0): int {.discardable.} =
   if f.EOF and f.st >= f.en: return -1
   buf.setLen(offset)
   var off = offset
   var gotany = false
   while true:
+    if f.en < 0: return -3
     if f.st >= f.en:
       if not f.EOF:
         (f.st, f.en) = (0, f.fp.read(f.buf, f.sz))
@@ -200,16 +210,64 @@ proc readUntil*[T](f: var Bufio[T], buf: var string, delim: int = -1,
       for i in f.st..<f.en:
         if f.buf[i] == char(delim): x = i; break
     gotany = true
-    var l = x - f.st
-    if keep and x < f.en: l += 1
-    if l > 0:
+    if x > f.st:
+      let l = x - f.st
       if buf.len < off + l: buf.setLen(off + l)
       copyMem(buf[off].addr, f.buf[f.st].addr, l)
       off += l
     f.st = x + 1
-    if x < f.en: break
+    if x < f.en: dret = f.buf[x]; break
   if not gotany and f.eof(): return -1
   if delim == -1 and off > 0 and buf[off - 1] == '\r':
     off -= 1
     buf.setLen(off)
   return off - offset
+
+proc readLine*[T](f: var Bufio[T], buf: var string): int {.discardable.} =
+  var dret: char
+  return readUntil(f, buf, dret)
+
+################
+# Fastx Reader #
+################
+
+type
+  FastxRecord* = ref object
+    seq*, qual*, name*, comment*: string
+    buf: string
+    lastChar: int
+
+proc readFastx*[T](f: var Bufio[T], r: var FastxRecord): int =
+  var x: int
+  if r.lastChar == 0:
+    while true:
+      x = f.read()
+      if x < 0 or x == int('>') or x == int('@'):
+        break;
+    if x < 0: return x # end-of-file or error
+    r.lastChar = x
+  r.seq.setLen(0); r.qual.setLen(0); r.comment.setLen(0)
+  var c: char
+  x = f.readUntil(r.name, c)
+  if x < 0: return x # EOF or error
+  if c != '\n': f.readUntil(r.comment, c) # read FASTA/Q comment
+  while true:
+    x = f.read()
+    if x < 0 or x == int('>') or x == int('+') or x == int('@'): break
+    if x == int('\n'): continue
+    r.seq.add(char(x))
+    f.readUntil(r.seq, c, -1, r.seq.len)
+  if x == int('>') or x == int('@'): r.lastChar = x
+  if x != int('+'): return r.seq.len
+  while true:           # skip the rest of the "+" line
+    x = f.read()
+    if x < 0 or char(x) == '\n': break
+  if x == -1: return -2 # error: no quality string
+  elif x < 0: return x  # error: other errors
+  while true:
+    x = f.readUntil(r.qual, c, -1, r.qual.len)
+    if x < 0 or r.qual.len >= r.seq.len: break
+  if x == -3: return -3 # other stream error
+  r.lastChar = 0
+  if r.seq.len != r.qual.len: return -2 # sequence and quality are of different lengths
+  return r.seq.len
