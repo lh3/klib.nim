@@ -152,7 +152,7 @@ proc xopen*[T](fn: string, mode: FileMode = fmRead,
 proc close*[T](f: var Bufio[T]): int {.discardable.} =
   return f.fp.close()
 
-proc eof*[T](f: Bufio[T]): bool =
+proc eof*[T](f: Bufio[T]): bool {.noSideEffect.} =
   result = (f.EOF and f.st >= f.en)
 
 proc readByte*[T](f: var Bufio[T]): int =
@@ -243,7 +243,7 @@ type
     status*: int
     lastChar: int
 
-proc readFastx*[T](f: var Bufio[T], r: var FastxRecord): bool =
+proc readFastx*[T](f: var Bufio[T], r: var FastxRecord): bool {.discardable.} =
   var x: int
   var c: char
   if r.lastChar == 0: # the header character hasn't been read yet
