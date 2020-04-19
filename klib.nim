@@ -1,4 +1,4 @@
-import os
+import os, algorithm
 
 const klibVer* = "0.1"
 
@@ -193,7 +193,7 @@ proc readUntil*[T](f: var Bufio[T], buf: var string, dret: var char,
   var gotany = false
   while true:
     if f.en < 0: return -3
-    if f.st >= f.en:
+    if f.st >= f.en: # buffer is empty
       if not f.EOF:
         (f.st, f.en) = (0, f.fp.read(f.buf, f.sz))
         if f.en < f.sz: f.EOF = true
@@ -203,18 +203,18 @@ proc readUntil*[T](f: var Bufio[T], buf: var string, dret: var char,
           return -2
       else: break
     var x: int = f.en
-    if delim == -1:
+    if delim == -1: # read a line
       for i in f.st..<f.en:
         if f.buf[i] == '\n': x = i; break
-    elif delim == -2:
+    elif delim == -2: # read a field
       for i in f.st..<f.en:
         if f.buf[i] == '\t' or f.buf[i] == ' ' or f.buf[i] == '\n':
           x = i; break
-    else:
+    else: # read to other delimitors
       for i in f.st..<f.en:
         if f.buf[i] == char(delim): x = i; break
     gotany = true
-    if x > f.st:
+    if x > f.st: # something to write to buf[]
       let l = x - f.st
       if buf.len < off + l: buf.setLen(off + l)
       copyMem(buf[off].addr, f.buf[f.st].addr, l)
@@ -230,8 +230,7 @@ proc readUntil*[T](f: var Bufio[T], buf: var string, dret: var char,
 proc readLine*[T](f: var Bufio[T], buf: var string): bool {.discardable.} =
   var dret: char
   var ret = readUntil(f, buf, dret)
-  return if ret >= 0: true
-    else: false
+  return if ret >= 0: true else: false
 
 ################
 # Fastx Reader #
@@ -276,3 +275,78 @@ proc readFastx*[T](f: var Bufio[T], r: var FastxRecord): bool {.discardable.} =
   r.lastChar = 0
   if r.seq.len != r.qual.len: r.status = -4; return false
   return true
+
+#############
+# Intervals #
+#############
+
+type
+  Interval*[T] = ref object
+    st*, en*: int
+    data*: T
+    max: int
+
+proc sort*[T](a: var seq[Interval[T]]) =
+  a.sort do (x, y: Interval[T]) -> int:
+    if x.st < y.st: -1
+    elif x.st > y.st: 1
+    else: 0
+
+proc index*[T](a: var seq[Interval[T]]): int {.discardable.} =
+  if a.len == 0: return 0
+  var is_srt = true
+  for i in 1..<a.len:
+    if a[i-1].st > a[i].st:
+      is_srt = false; break
+  if not is_srt: a.sort()
+  var last_i, last: int
+  for i in countup(0, a.len-1, 2): # leaves (i.e. at level 0)
+    (last_i, last, a[i].max) = (i, a[i].en, a[i].en)
+  var k = 1
+  while 1 shl k <= a.len: # process internal nodes in the bottom-up order
+    let x = 1 shl (k - 1)
+    let i0 = (x shl 1) - 1 # the first node at level k
+    let step = x shl 2
+    for i in countup(i0, a.len - 1, step): # traverse nodes at level k
+      let el = a[i - x].max  # max value of the left child
+      let er = if i + x < a.len: a[i + x].max else: last # of the right child
+      var e = a[i].en
+      if e < el: e = el
+      if e < er: e = er
+      a[i].max = e
+    # point last_i to the parent of the original last_i
+    last_i = if ((last_i shr k) and 1) != 0: last_i - x else: last_i + x
+    if last_i < a.len and a[last_i].max > last: # update last accordingly
+      last = a[last_i].max
+    k += 1
+  return k - 1
+
+type
+  IntvStack = ref object
+    k, x, w: int
+
+iterator overlap*[T](a: seq[Interval[T]], st: int, en: int): int =
+  var h: int = 0
+  while 1 shl h <= a.len: h += 1
+  h -= 1 # h is the height of the tree
+  var stack: array[64, IntvStack] # 64 is the max possible tree height
+  var t: int = 0
+  stack[t] = IntvStack(k:h, x:(1 shl h) - 1, w:0); t += 1 # push the root
+  while t > 0: # the following guarantees sorted "yield"
+    t -= 1
+    let z = stack[t] # pop from the stack
+    if z.k <= 3: # in a small subtree, traverse everything
+      let i0 = (z.x shr z.k) shl z.k
+      var i1 = i0 + (1 shl (z.k + 1)) - 1
+      if i1 >= a.len: i1 = a.len
+      for i in countup(i0, i1 - 1):
+        if a[i].st >= en: break  # out of range; no need to proceed
+        if st < a[i].en: yield i # overlap! yield
+    elif z.w == 0: # the left child not processed
+      let y = z.x - (1 shl (z.k - 1)) # the left child of z.x; y may >=a.len
+      stack[t] = IntvStack(k:z.k, x:z.x, w:1); t += 1
+      if y >= a.len or a[y].max > st:
+        stack[t] = IntvStack(k:z.k-1, x:y, w:0); t += 1 # add left child
+    elif z.x < a.len and a[z.x].st < en: # need to push the right child
+      if st < a[z.x].en: yield z.x # test if z.x overlaps the query
+      stack[t] = IntvStack(k:z.k - 1, x:z.x + (1 shl (z.k - 1)), w:0); t += 1
