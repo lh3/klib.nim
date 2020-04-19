@@ -1,5 +1,7 @@
 import os
 
+const klibVer* = "0.1"
+
 ###################################
 # Unix getopt() and getopt_long() #
 ###################################
@@ -114,11 +116,13 @@ proc close(f: var GzFile): int {.discardable.} =
   if f != nil and f.fp != nil:
     result = int(gzclose(f.fp))
     f.fp = nil
+  else: result = 0
 
 proc read(f: var GzFile, buf: var string, sz: int, offset: int = 0):
     int {.discardable.} =
   if buf.len < offset + sz: buf.setLen(offset + sz)
   result = gzread(f.fp, buf[offset].addr, buf.len)
+  buf.setLen(result)
 
 ###################
 # Buffered reader #
@@ -151,7 +155,7 @@ proc close*[T](f: var Bufio[T]): int {.discardable.} =
 proc eof*[T](f: Bufio[T]): bool =
   result = (f.EOF and f.st >= f.en)
 
-proc read*[T](f: var Bufio[T]): int =
+proc readByte*[T](f: var Bufio[T]): int =
   if f.EOF and f.st >= f.en: return -1
   if f.st >= f.en:
     (f.st, f.en) = (0, f.fp.read(f.buf, f.sz))
@@ -223,9 +227,11 @@ proc readUntil*[T](f: var Bufio[T], buf: var string, dret: var char,
     buf.setLen(off)
   return off - offset
 
-proc readLine*[T](f: var Bufio[T], buf: var string): int {.discardable.} =
+proc readLine*[T](f: var Bufio[T], buf: var string): bool {.discardable.} =
   var dret: char
-  return readUntil(f, buf, dret)
+  var ret = readUntil(f, buf, dret)
+  return if ret >= 0: true
+    else: false
 
 ################
 # Fastx Reader #
@@ -234,40 +240,39 @@ proc readLine*[T](f: var Bufio[T], buf: var string): int {.discardable.} =
 type
   FastxRecord* = ref object
     seq*, qual*, name*, comment*: string
-    buf: string
+    status*: int
     lastChar: int
 
-proc readFastx*[T](f: var Bufio[T], r: var FastxRecord): int =
+proc readFastx*[T](f: var Bufio[T], r: var FastxRecord): bool =
   var x: int
-  if r.lastChar == 0:
-    while true:
-      x = f.read()
-      if x < 0 or x == int('>') or x == int('@'):
-        break;
-    if x < 0: return x # end-of-file or error
+  var c: char
+  if r.lastChar == 0: # the header character hasn't been read yet
+    while true:       # look for the header character '>' or '@'
+      x = f.readByte()
+      if x < 0 or x == int('>') or x == int('@'): break
+    if x < 0: r.status = x; return false # end-of-file or stream error
     r.lastChar = x
   r.seq.setLen(0); r.qual.setLen(0); r.comment.setLen(0)
-  var c: char
-  x = f.readUntil(r.name, c)
-  if x < 0: return x # EOF or error
+  x = f.readUntil(r.name, c, -2)
+  if x < 0: r.status = x; return false       # EOF or stream error
   if c != '\n': f.readUntil(r.comment, c) # read FASTA/Q comment
-  while true:
-    x = f.read()
+  while true:         # read sequence
+    x = f.readByte()  # read the first char on a line
     if x < 0 or x == int('>') or x == int('+') or x == int('@'): break
     if x == int('\n'): continue
     r.seq.add(char(x))
-    f.readUntil(r.seq, c, -1, r.seq.len)
+    f.readUntil(r.seq, c, -1, r.seq.len)  # read the rest of the seq line
+  r.status = r.seq.len   # for normal records, this keeps the sequence length
   if x == int('>') or x == int('@'): r.lastChar = x
-  if x != int('+'): return r.seq.len
-  while true:           # skip the rest of the "+" line
-    x = f.read()
-    if x < 0 or char(x) == '\n': break
-  if x == -1: return -2 # error: no quality string
-  elif x < 0: return x  # error: other errors
-  while true:
+  if x != int('+'): return true
+  while true:         # skip the rest of the "+" line
+    x = f.readByte()
+    if x < 0 or x == int('\n'): break
+  if x < 0: r.status = x; return false  # error: no quality
+  while true:         # read quality
     x = f.readUntil(r.qual, c, -1, r.qual.len)
     if x < 0 or r.qual.len >= r.seq.len: break
-  if x == -3: return -3 # other stream error
+  if x == -3: r.status = -3; return false # other stream error
   r.lastChar = 0
-  if r.seq.len != r.qual.len: return -2 # sequence and quality are of different lengths
-  return r.seq.len
+  if r.seq.len != r.qual.len: r.status = -4; return false
+  return true
