@@ -95,33 +95,32 @@ proc gzread(thefile: gzFile, buf: pointer, length: int): int32{.cdecl,
 proc gzclose(thefile: gzFile): int32{.cdecl, dynlib: libz, importc: "gzclose".}
 
 type
-  GzFile* = ref object
-    fp: gzFile
+  GzFile* = gzFile
 
 proc open(f: var GzFile, fn: string,
     mode: FileMode = fmRead): int {.discardable.} =
   assert(mode == fmRead or mode == fmWrite)
   result = 0
   if fn == "-" or fn == "":
-    if mode == fmRead: f.fp = gzdopen(0, cstring("r"))
-    elif mode == fmWrite: f.fp = gzdopen(1, cstring("w"))
+    if mode == fmRead: f = gzdopen(0, cstring("r"))
+    elif mode == fmWrite: f = gzdopen(1, cstring("w"))
   else:
-    if mode == fmRead: f.fp = gzopen(cstring(fn), cstring("r"))
-    elif mode == fmWrite: f.fp = gzopen(cstring(fn), cstring("w"))
-  if f.fp == nil:
+    if mode == fmRead: f = gzopen(cstring(fn), cstring("r"))
+    elif mode == fmWrite: f = gzopen(cstring(fn), cstring("w"))
+  if f == nil:
     result = -1
     raise newException(IOError, "error opening " & fn)
 
 proc close(f: var GzFile): int {.discardable.} =
-  if f != nil and f.fp != nil:
-    result = int(gzclose(f.fp))
-    f.fp = nil
+  if f != nil:
+    result = int(gzclose(f))
+    f = nil
   else: result = 0
 
 proc read(f: var GzFile, buf: var string, sz: int, offset: int = 0):
     int {.discardable.} =
   if buf.len < offset + sz: buf.setLen(offset + sz)
-  result = gzread(f.fp, buf[offset].addr, buf.len)
+  result = gzread(f, buf[offset].addr, buf.len)
   buf.setLen(result)
 
 ###################
@@ -129,23 +128,18 @@ proc read(f: var GzFile, buf: var string, sz: int, offset: int = 0):
 ###################
 
 type
-  Bufio*[T] = ref object
-    fp: T
-    buf: string
-    st, en, sz: int
-    EOF: bool
+  Bufio*[T] = tuple[fp: T, buf: string, st, en, sz: int, EOF: bool]
 
 proc open*[T](f: var Bufio[T], fn: string, mode: FileMode = fmRead,
     sz: int = 0x10000): int {.discardable.} =
   assert(mode == fmRead) # only fmRead is supported for now
-  f.fp = T()
   result = f.fp.open(fn, mode)
   (f.st, f.en, f.sz, f.EOF) = (0, 0, sz, false)
   f.buf.setLen(sz)
 
 proc xopen*[T](fn: string, mode: FileMode = fmRead,
     sz: int = 0x10000): Bufio[T] =
-  var f = Bufio[T]()
+  var f: Bufio[T]
   f.open(fn, mode, sz)
   return f
 
@@ -237,10 +231,7 @@ proc readLine*[T](f: var Bufio[T], buf: var string): bool {.discardable.} =
 ################
 
 type
-  FastxRecord* = ref object
-    seq*, qual*, name*, comment*: string
-    status*: int
-    lastChar: int
+  FastxRecord* = tuple[seq, qual, name, comment: string, status, lastChar: int]
 
 proc readFastx*[T](f: var Bufio[T], r: var FastxRecord): bool {.discardable.} =
   var x: int
@@ -281,7 +272,7 @@ proc readFastx*[T](f: var Bufio[T], r: var FastxRecord): bool {.discardable.} =
 #############
 
 type
-  Interval*[T] = tuple[st, en, max: int, data: T]
+  Interval*[T] = tuple[st, en: int, data: T, max: int]
 
 proc sort*[T](a: var seq[Interval[T]]) =
   a.sort do (x, y: Interval[T]) -> int:
@@ -318,7 +309,7 @@ proc index*[T](a: var seq[Interval[T]]): int {.discardable.} =
     k += 1
   return k - 1
 
-iterator overlap*[T](a: seq[Interval[T]], st: int, en: int): int =
+iterator overlap*[T](a: seq[Interval[T]], st: int, en: int): int {.noSideEffect.} =
   var h: int = 0
   while 1 shl h <= a.len: h += 1
   h -= 1 # h is the height of the tree
