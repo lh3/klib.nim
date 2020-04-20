@@ -330,19 +330,19 @@ iterator overlap*[T](a: seq[Interval[T]], st: int, en: int): int =
   stack[t] = (h, (1 shl h) - 1, 0); t += 1 # push the root
   while t > 0: # the following guarantees sorted "yield"
     t -= 1
-    let z = stack[t] # pop from the stack
-    if z.k <= 3: # in a small subtree, traverse everything
-      let i0 = (z.x shr z.k) shl z.k
-      var i1 = i0 + (1 shl (z.k + 1)) - 1
+    let (k, x, w) = stack[t] # pop from the stack
+    if k <= 3: # in a small subtree, traverse everything
+      let i0 = (x shr k) shl k
+      var i1 = i0 + (1 shl (k + 1)) - 1
       if i1 >= a.len: i1 = a.len
       for i in countup(i0, i1 - 1):
         if a[i].st >= en: break  # out of range; no need to proceed
         if st < a[i].en: yield i # overlap! yield
-    elif z.w == 0: # the left child not processed
-      let y = z.x - (1 shl (z.k - 1)) # the left child of z.x; y may >=a.len
-      stack[t] = (z.k, z.x, 1); t += 1
+    elif w == 0: # the left child not processed
+      let y = x - (1 shl (k - 1)) # the left child of z.x; y may >=a.len
+      stack[t] = (k, x, 1); t += 1
       if y >= a.len or a[y].max > st:
-        stack[t] = (z.k-1, y, 0); t += 1 # add left child
-    elif z.x < a.len and a[z.x].st < en: # need to push the right child
-      if st < a[z.x].en: yield z.x # test if z.x overlaps the query
-      stack[t] = (z.k - 1, z.x + (1 shl (z.k - 1)), 0); t += 1
+        stack[t] = (k-1, y, 0); t += 1 # add left child
+    elif x < a.len and a[x].st < en: # need to push the right child
+      if st < a[x].en: yield x # test if x overlaps the query
+      stack[t] = (k - 1, x + (1 shl (k - 1)), 0); t += 1
