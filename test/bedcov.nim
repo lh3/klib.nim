@@ -31,10 +31,10 @@ while f2.readLine(line):
     let st0 = parseInt(t[1])
     let en0 = parseInt(t[2])
     var cov_st, cov_en, cov, cnt: int
-    for i in a[].overlap(st0, en0):
+    for x in a[].overlap(st0, en0):
       cnt += 1
-      let st1 = if a[i].st > st0: a[i].st else: st0
-      let en1 = if a[i].en < en0: a[i].en else: en0
+      let st1 = if x.st > st0: x.st else: st0
+      let en1 = if x.en < en0: x.en else: en0
       if st1 > cov_en:
         cov += cov_en - cov_st
         (cov_st, cov_en) = (st1, en1)

@@ -309,7 +309,7 @@ proc index*[T](a: var seq[Interval[T]]): int {.discardable.} =
     k += 1
   return k - 1
 
-iterator overlap*[T](a: seq[Interval[T]], st: int, en: int): int {.noSideEffect.} =
+iterator overlap*[T](a: seq[Interval[T]], st: int, en: int): Interval[T] {.noSideEffect.} =
   var h: int = 0
   while 1 shl h <= a.len: h += 1
   h -= 1 # h is the height of the tree
@@ -325,12 +325,12 @@ iterator overlap*[T](a: seq[Interval[T]], st: int, en: int): int {.noSideEffect.
       if i1 >= a.len: i1 = a.len
       for i in countup(i0, i1 - 1):
         if a[i].st >= en: break  # out of range; no need to proceed
-        if st < a[i].en: yield i # overlap! yield
+        if st < a[i].en: yield a[i] # overlap! yield
     elif w == 0: # the left child not processed
       let y = x - (1 shl (k - 1)) # the left child of z.x; y may >=a.len
       stack[t] = (k, x, 1); t += 1
       if y >= a.len or a[y].max > st:
         stack[t] = (k-1, y, 0); t += 1 # add left child
     elif x < a.len and a[x].st < en: # need to push the right child
-      if st < a[x].en: yield x # test if x overlaps the query
+      if st < a[x].en: yield a[x] # test if x overlaps the query
       stack[t] = (k - 1, x + (1 shl (k - 1)), 0); t += 1
