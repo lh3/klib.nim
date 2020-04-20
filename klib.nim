@@ -281,10 +281,7 @@ proc readFastx*[T](f: var Bufio[T], r: var FastxRecord): bool {.discardable.} =
 #############
 
 type
-  Interval*[T] = ref object
-    st*, en*: int
-    data*: T
-    max: int
+  Interval*[T] = tuple[st, en, max: int, data: T]
 
 proc sort*[T](a: var seq[Interval[T]]) =
   a.sort do (x, y: Interval[T]) -> int:

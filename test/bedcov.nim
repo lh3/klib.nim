@@ -15,7 +15,7 @@ var
 while f1.readLine(line):
   var t = line.split('\t')
   if not bed.hasKey(t[0]): bed[t[0]] = @[]
-  bed[t[0]].add(Interval[int](st:parseInt(t[1]), en:parseInt(t[2]), data:lineno))
+  bed[t[0]].add((parseInt(t[1]), parseInt(t[2]), lineno, 0))
   lineno += 1
 for ctg in bed.keys():
   bed[ctg].index()
