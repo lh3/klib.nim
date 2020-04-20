@@ -27,11 +27,11 @@ while f2.readLine(line):
   if not bed.hasKey(t[0]):
     echo t[0], '\t', t[1], '\t', t[2], "\t0\t0"
   else:
-    var a = bed[t[0]]
+    var a = bed[t[0]].addr
     let st0 = parseInt(t[1])
     let en0 = parseInt(t[2])
     var cov_st, cov_en, cov, cnt: int
-    for i in a.overlap(st0, en0):
+    for i in a[].overlap(st0, en0):
       cnt += 1
       let st1 = if a[i].st > st0: a[i].st else: st0
       let en1 = if a[i].en < en0: a[i].en else: en0
